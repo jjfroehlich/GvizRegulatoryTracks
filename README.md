@@ -12,39 +12,22 @@ Both return normal `Gviz::CustomTrack` objects. They can be combined with
 
 ## Examples
 
-Two examples use small real-data slices in standard formats: BigWig, BED6,
-MEME, and FASTA.
-
-```r
-demo("multi_motif_example", package = "GvizRegulatoryTracks")
-demo("repeated_motif_example", package = "GvizRegulatoryTracks")
-```
-
-The first compares nucleotide coloring, motif-ID coloring, score-only fill,
-and combined motif-ID/score styling.
-
 ![Multi-motif example](man/figures/multi_motif_example.png)
-
-The second combines a TF-MoDISco pattern with repeated matches of the same PWM
-at different relative FIMO scores.
 
 ![Repeated-motif example](man/figures/repeated_motif_example.png)
 
-The scripts are in `demo/`. Compact inputs and their provenance are in
-`inst/extdata/example_multi_motif/` and
-`inst/extdata/example_repeated_motif/`.
 
 ## What It Does
-
+### Score Sequence Tracks
 - Draws positive and negative nucleotide scores above and below zero.
 - Retrieves reference sequence from FASTA, BSgenome, 2bit, DNAStringSet, or an
   existing Gviz `SequenceTrack`.
 - Switches from nucleotide letters to a normal resolution-aware Gviz signal
   track when zoomed out.
+### Motif Logo Tracks
 - Reads motif matches from BED or `GRanges` and motifs from MEME files,
   matrices, or `universalmotif` objects.
-- Reverse-complements minus-strand motifs into reference-genome orientation.
-- Automatically separates overlapping motif matches into lanes.
+- Reverse-complements minus-strand motif-matches into reference-genome orientation.
 - Colors motifs by nucleotide, motif ID, score, or a combination of motif ID
   and score.
 - Switches from logos to genomic ranges when the view becomes too wide.
@@ -87,8 +70,7 @@ plotTracks(
 )
 ```
 
-`DynSeqTrack()` is the shorter contribution-focused name for
-`ScoreSequenceTrack()`.
+`DynSeqTrack()` is an alias name for `ScoreSequenceTrack()`.
 
 ## Inputs
 
@@ -100,9 +82,8 @@ plotTracks(
 | Motif logo | BED or `GRanges` | MEME, matrices, or `universalmotif` |
 
 A BigWig only contains scores. Supply `reference` when you also want letters.
-Without sequence, `ScoreSequenceTrack()` still works as a signal track. This
-makes the same constructor useful for contribution scores, phyloP, phastCons,
-and other base-resolution BigWigs.
+Without sequence, `ScoreSequenceTrack()` still works as a signal track. 
+Same constructor works for any base-resolution genomic score, such as attribution/contribution or phyloP conservation. 
 
 For very large BigWigs, an alternative reader can be supplied through
 `importFunction(file, selection)`. The function should return a scored
@@ -110,8 +91,7 @@ For very large BigWigs, an alternative reader can be supplied through
 
 ## Score Sequence Tracks
 
-At close zoom, letters are scaled by their signed value. Positive values are
-upright and negative values are inverted below zero. At wider views, drawing is
+At close zoom, letters are scaled by their signed value. At wider views, drawing is
 delegated to a real `Gviz::DataTrack`, including Gviz window aggregation.
 
 The y axis is also handled by Gviz. Options such as `showAxis`, `ylim`,
@@ -121,14 +101,10 @@ The left data boundary is drawn by default; use `showBoundary`,
 `boundaryColor`, `boundaryWidth`, and `boundaryInset` to change it. The inset
 keeps adjacent track markers visually separate.
 
-```r
-shared_ylim <- scoreYlim(scores_condition_1, scores_condition_2)
-```
-
 ## Motif Logo Tracks
 
-The BED `name` column normally contains the motif ID. It must match a motif name
-in the MEME file, and the imported hit width must match the PWM width.
+The BED `name` column should contain the motif ID and match a motif name
+in the MEME file. The imported hit width must match the PWM width.
 
 Use the standard nucleotide colors:
 
