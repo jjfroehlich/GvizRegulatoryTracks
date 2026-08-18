@@ -10,6 +10,30 @@
 Both return normal `Gviz::CustomTrack` objects. They can be combined with
 `DataTrack`, `AnnotationTrack`, `GeneRegionTrack`, and the other Gviz tracks.
 
+## Examples
+
+Two examples use small real-data slices in standard formats: BigWig, BED6,
+MEME, and FASTA.
+
+```r
+demo("multi_motif_example", package = "GvizRegulatoryTracks")
+demo("repeated_motif_example", package = "GvizRegulatoryTracks")
+```
+
+The first compares nucleotide coloring, motif-ID coloring, score-only fill,
+and combined motif-ID/score styling.
+
+![Multi-motif example](man/figures/multi_motif_example.png)
+
+The second combines a TF-MoDISco pattern with repeated matches of the same PWM
+at different relative FIMO scores.
+
+![Repeated-motif example](man/figures/repeated_motif_example.png)
+
+The scripts are in `demo/`. Compact inputs and their provenance are in
+`inst/extdata/example_multi_motif/` and
+`inst/extdata/example_repeated_motif/`.
+
 ## What It Does
 
 - Draws positive and negative nucleotide scores above and below zero.
@@ -150,30 +174,6 @@ stretching or overlapping.
 
 Minus-strand hits are reverse-complemented by default. Set `showStrand = TRUE`
 to add strand labels. `reverseStrand = TRUE` in `plotTracks()` is handled too.
-
-## Examples
-
-Two examples use small real-data slices in standard formats: BigWig, BED6,
-MEME, and FASTA.
-
-```r
-demo("multi_motif_example", package = "GvizRegulatoryTracks")
-demo("repeated_motif_example", package = "GvizRegulatoryTracks")
-```
-
-The first compares nucleotide coloring, motif-ID coloring, score-only fill,
-and combined motif-ID/score styling.
-
-![Multi-motif example](man/figures/multi_motif_example.png)
-
-The second combines a TF-MoDISco pattern with repeated matches of the same PWM
-at different relative FIMO scores.
-
-![Repeated-motif example](man/figures/repeated_motif_example.png)
-
-The scripts are in `demo/`. Compact inputs and their provenance are in
-`inst/extdata/example_multi_motif/` and
-`inst/extdata/example_repeated_motif/`.
 
 ## Coordinate Conventions
 
