@@ -11,11 +11,13 @@ scoreYlim(..., scoreColumn = "score", padding = 0.05)
 }
 \arguments{
 \item{...}{Numeric vectors, \code{GRanges} objects, or a single list containing
-either. For \code{GRanges}, values are taken from \code{scoreColumn}.}
+either. For \code{GRanges}, values are taken from \code{scoreColumn}; numeric factor
+and character columns are parsed strictly.}
 
 \item{scoreColumn}{Metadata column containing scores in \code{GRanges} inputs.}
 
-\item{padding}{Fractional padding added above the largest absolute score.}
+\item{padding}{Non-negative fractional padding added above the largest
+absolute score.}
 }
 \value{
 A numeric vector of length two.

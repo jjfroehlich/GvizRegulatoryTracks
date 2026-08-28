@@ -1,13 +1,15 @@
 # GvizRegulatoryTracks
 
-`GvizRegulatoryTracks` adds two custom genomic tracks to
+`GvizRegulatoryTracks` adds three custom genomic tracks to
 [Gviz](https://bioconductor.org/packages/Gviz):
 
 - `ScoreSequenceTrack()` scales every nucleotide by a signed score, for
   example a ChromBPNet contribution score.
 - `MotifLogoTrack()` places sequence logos directly at genomic motif matches.
+- `DirectionalRangeTrack()` draws stranded genomic ranges with compact,
+  fixed-width tips.
 
-Both return normal `Gviz::CustomTrack` objects. They can be combined with
+All return normal `Gviz::CustomTrack` objects. They can be combined with
 `DataTrack`, `AnnotationTrack`, `GeneRegionTrack`, and the other Gviz tracks.
 
 ## Examples
@@ -31,6 +33,13 @@ Both return normal `Gviz::CustomTrack` objects. They can be combined with
 - Colors motifs by nucleotide, motif ID, score, or a combination of motif ID
   and score.
 - Switches from logos to genomic ranges when the view becomes too wide.
+
+### Directional Range Tracks
+
+- Draws fixed-tip pointed ranges or rectangles without zoom-dependent
+  arrowhead distortion.
+- Assigns deterministic lanes to overlapping ranges and supports feature
+  colors, labels, and optional strand indicators.
 
 ## Installation
 
@@ -61,10 +70,21 @@ motif_track <- MotifLogoTrack(
     name = "Motifs"
 )
 
+direction_hits <- GRanges(
+    "chr1", IRanges(c(100030, 100110), width = c(55, 75)),
+    strand = c("+", "-"), feature = c("enhancer", "promoter")
+)
+
+direction_track <- DirectionalRangeTrack(
+    direction_hits,
+    fill = c(enhancer = "#0072B2", promoter = "#D55E00"),
+    name = "Regulatory ranges"
+)
+
 plotTracks(
-    list(score_track, motif_track),
+    list(score_track, motif_track, direction_track),
     chromosome = "chr1", from = 100001, to = 100250,
-    sizes = c(1.3, 1),
+    sizes = c(1.3, 1, 0.8),
     background.title = "transparent",
     col.border.title = "transparent"
 )
@@ -74,16 +94,21 @@ plotTracks(
 
 ## Inputs
 
-| Track | Main input | Sequence or motif input |
+| Track | Main input | Secondary input |
 |---|---|---|
 | Score sequence | Numeric vector | DNA string |
 | Score sequence | Scored `GRanges` | DNA or a reference source |
 | Score sequence | BigWig or bedGraph | DNA or a reference source |
 | Motif logo | BED or `GRanges` | MEME, matrices, or `universalmotif` |
+| Directional range | Stranded `GRanges` | Optional feature and label columns |
 
 A BigWig only contains scores. Supply `reference` when you also want letters.
 Without sequence, `ScoreSequenceTrack()` still works as a signal track. 
 Same constructor works for any base-resolution genomic score, such as attribution/contribution or phyloP conservation. 
+
+Score metadata in `GRanges` may be numeric or fully parseable numeric factor or
+character values. Malformed, missing, and infinite track scores are rejected
+before plotting.
 
 For very large BigWigs, an alternative reader can be supplied through
 `importFunction(file, selection)`. The function should return a scored
@@ -150,6 +175,30 @@ stretching or overlapping.
 
 Minus-strand hits are reverse-complemented by default. Set `showStrand = TRUE`
 to add strand labels. `reverseStrand = TRUE` in `plotTracks()` is handled too.
+Use `labelColumn` to display a metadata label independently of the motif ID.
+
+## Directional Range Tracks
+
+`DirectionalRangeTrack()` accepts a non-empty, single-chromosome `GRanges`.
+Pointed ranges use a fixed physical tip width, capped for short ranges, while
+`geometry = "rectangle"` draws plain rectangles. Use `stacking = "squish"`
+for deterministic non-overlapping lanes or `stacking = "dense"` for one lane.
+
+```r
+direction_track <- DirectionalRangeTrack(
+    direction_hits,
+    featureColumn = "feature",
+    fill = c(enhancer = "#0072B2", promoter = "#D55E00"),
+    directionIndicator = "arrow",
+    showLabels = TRUE,
+    labelPosition = "above"
+)
+```
+
+Named `fill` vectors map feature values to colors. An unnamed vector assigns
+colors in first-seen feature order. Labels can come from a separate metadata
+column through `labelColumn`. Pointed geometry and strand indicators preserve
+their displayed direction when Gviz reverses the genomic axis.
 
 ## Coordinate Conventions
 
@@ -159,6 +208,8 @@ to add strand labels. `reverseStrand = TRUE` in `plotTracks()` is handled too.
 - BigWig regions are selected with one-based `GRanges`; `rtracklayer` handles
   the on-disk convention.
 - Motif hit width must equal PWM width after import.
+- Directional range bodies cover the full closed `GRanges` interval, including
+  a visible one-base footprint for width-one ranges.
 
 For example, BED `chr1 9 12` imports as `chr1:10-12`, with width three.
 

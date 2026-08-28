@@ -22,6 +22,11 @@ test_that("motif widths and IDs are validated", {
     expect_s4_class(MotifLogoTrack(hit, list(M1 = motif)), "CustomTrack")
     expect_error(MotifLogoTrack(GenomicRanges::resize(hit, 2), list(M1 = motif)), "widths")
     expect_error(MotifLogoTrack(hit, list(M2 = motif)), "Missing motif")
+
+    zero_width <- GenomicRanges::GRanges(
+        "chr1", IRanges::IRanges(start = 10, width = 0), motif_id = "M1"
+    )
+    expect_error(MotifLogoTrack(zero_width, list(M1 = motif)), "positive-width")
 })
 
 test_that("overlapping motifs receive deterministic lanes", {
@@ -149,6 +154,81 @@ test_that("motif scores map independently to fill, border, and opacity", {
     )
 })
 
+test_that("motif score metadata are parsed strictly", {
+    motif <- matrix(0.25, nrow = 4, ncol = 3,
+                    dimnames = list(c("A", "C", "G", "T"), NULL))
+    hits <- GenomicRanges::GRanges(
+        "chr1", IRanges::IRanges(c(10, 20), width = 3),
+        motif_id = "M1", relative_score = factor(c("0.2", "0.8"))
+    )
+    factor_track <- MotifLogoTrack(
+        hits, list(M1 = motif), scoreColumn = "relative_score",
+        scoreAesthetic = "fill", scoreLimits = c(0, 1)
+    )
+    expect_equal(
+        methods::slot(factor_track, "variables")$hitStyles$score,
+        c(0.2, 0.8)
+    )
+
+    S4Vectors::mcols(hits)$relative_score <- c("0.1", "0.9")
+    character_track <- MotifLogoTrack(
+        hits, list(M1 = motif), scoreColumn = "relative_score",
+        scoreAesthetic = "fill", scoreLimits = c(0, 1)
+    )
+    expect_equal(
+        methods::slot(character_track, "variables")$hitStyles$score,
+        c(0.1, 0.9)
+    )
+
+    S4Vectors::mcols(hits)$relative_score <- c("0.1", "bad")
+    expect_error(
+        MotifLogoTrack(hits, list(M1 = motif), scoreColumn = "relative_score",
+                       scoreAesthetic = "fill"),
+        "non-numeric"
+    )
+    S4Vectors::mcols(hits)$relative_score <- c(0.1, NA)
+    expect_error(
+        MotifLogoTrack(hits, list(M1 = motif), scoreColumn = "relative_score",
+                       scoreAesthetic = "fill"),
+        "finite, non-missing"
+    )
+    S4Vectors::mcols(hits)$relative_score <- c(0.1, Inf)
+    expect_error(
+        MotifLogoTrack(hits, list(M1 = motif), scoreColumn = "relative_score",
+                       scoreAesthetic = "fill"),
+        "finite, non-missing"
+    )
+})
+
+test_that("motif-track display parameters fail early when invalid", {
+    motif <- matrix(0.25, nrow = 4, ncol = 3,
+                    dimnames = list(c("A", "C", "G", "T"), NULL))
+    hit <- GenomicRanges::GRanges(
+        "chr1", IRanges::IRanges(10, 12), motif_id = "M1", score = 0.5
+    )
+    make_track <- function(...) MotifLogoTrack(hit, list(M1 = motif), ...)
+
+    expect_error(make_track(maxBases = 0), "maxBases")
+    expect_error(make_track(maxBases = 1.5), "maxBases")
+    expect_error(make_track(maxRangeLabels = -1), "maxRangeLabels")
+    expect_error(make_track(maxRangeLabels = 1.5), "maxRangeLabels")
+    expect_error(make_track(rangeAlpha = -0.1), "rangeAlpha")
+    expect_error(make_track(rangeAlpha = 1.1), "rangeAlpha")
+    expect_error(make_track(scoreBorderWidth = -0.1), "scoreBorderWidth")
+    expect_error(make_track(showLabels = NA), "showLabels")
+    expect_error(make_track(showStrand = 1), "showStrand")
+    expect_error(make_track(showScoreLegend = NA), "showScoreLegend")
+    expect_error(make_track(scoreLegendDigits = 1.5), "scoreLegendDigits")
+    expect_error(make_track(rangeFill = "not-a-color"), "rangeFill")
+    expect_error(make_track(scorePalette = c("white", "not-a-color")),
+                 "scorePalette")
+    expect_error(make_track(scoreLimits = c(1, 0)), "scoreLimits")
+    expect_error(
+        make_track(colors = c(A = "bad", C = "blue", G = "gold", T = "red")),
+        "colors"
+    )
+})
+
 test_that("nucleotide logo colors can be shared without score encoding", {
     motif <- matrix(0.25, nrow = 4, ncol = 3,
                     dimnames = list(c("A", "C", "G", "T"), NULL))
@@ -246,6 +326,21 @@ test_that("view, global, and fixed score limits are resolved predictably", {
         fixed_vars, c(FALSE, TRUE, TRUE)
     )
     expect_equal(fixed$limits, c(0, 1))
+
+    factor_hits <- hits
+    S4Vectors::mcols(factor_hits)$relative_score <- factor(
+        c("0.2", "0.5", "0.8")
+    )
+    factor_track <- MotifLogoTrack(
+        factor_hits, list(M1 = motif), scoreColumn = "relative_score",
+        scoreAesthetic = "fill", scoreLimits = "view"
+    )
+    factor_vars <- methods::slot(factor_track, "variables")
+    factor_view <- GvizRegulatoryTracks:::.visible_motif_styles(
+        factor_vars, c(TRUE, FALSE, TRUE)
+    )
+    expect_equal(factor_view$limits, c(0.2, 0.8))
+    expect_equal(factor_view$styles$scaledScore, c(0, 1))
 })
 
 test_that("multiple motif IDs receive stable categorical colors", {
@@ -298,6 +393,36 @@ test_that("motif identity fill combines with score brightness opacity and border
         ),
         "mutually|cannot be combined"
     )
+})
+
+test_that("overview ranges inherit motif score aesthetics", {
+    motif <- matrix(0.25, nrow = 4, ncol = 3,
+                    dimnames = list(c("A", "C", "G", "T"), NULL))
+    hits <- GenomicRanges::GRanges(
+        "chr1", IRanges::IRanges(c(10, 20), width = 3),
+        motif_id = c("M1", "M1"), relative_score = c(0, 1)
+    )
+    track <- MotifLogoTrack(
+        hits, list(M1 = motif), scoreColumn = "relative_score",
+        scoreAesthetic = c("brightness", "opacity", "border"),
+        scoreLimits = c(0, 1), display = "ranges",
+        scoreBrightness = c(0.97, 0), scoreOpacity = c(0.18, 1)
+    )
+    vars <- methods::slot(track, "variables")
+    range_styles <- GvizRegulatoryTracks:::.resolve_motif_range_styles(
+        vars$hitStyles, vars
+    )
+    expect_false(identical(range_styles$fill[1], range_styles$fill[2]))
+    expect_lt(range_styles$alpha[1], range_styles$alpha[2])
+    expect_false(identical(range_styles$border[1], range_styles$border[2]))
+})
+
+test_that("score legend reserves space for multiline titles", {
+    one_line <- GvizRegulatoryTracks:::.score_legend_layout("PWM score")
+    two_line <- GvizRegulatoryTracks:::.score_legend_layout("Relative\nPWM score")
+    expect_equal(two_line$title_just, c("center", "top"))
+    expect_lt(two_line$gradient_max, one_line$gradient_max)
+    expect_gt(two_line$gradient_max, two_line$gradient_min)
 })
 
 test_that("a single score color generates a light-to-base fill gradient", {
@@ -420,4 +545,41 @@ test_that("motif tracks draw in Gviz in both orientations", {
     expect_no_error(Gviz::plotTracks(track, chromosome = "chr1", from = 1, to = 2500))
     grDevices::dev.off()
     expect_gt(file.info(file)$size, 0)
+})
+
+test_that("motif tracks support an independent display-label column", {
+    motif <- rbind(
+        A = c(0.8, 0.1), C = c(0.1, 0.1),
+        G = c(0.05, 0.7), T = c(0.05, 0.1)
+    )
+    hit <- GenomicRanges::GRanges(
+        "chr1", IRanges::IRanges(10, 11), strand = "+",
+        motif_id = "pattern_8", tomtom_label = "SOX2 / p8"
+    )
+    track <- MotifLogoTrack(
+        hit, list(pattern_8 = motif), labelColumn = "tomtom_label",
+        showLabels = TRUE
+    )
+    prepared_hits <- methods::slot(track, "variables")$hits
+    expect_equal(S4Vectors::mcols(prepared_hits)$label, "SOX2 / p8")
+    expect_equal(
+        GvizRegulatoryTracks:::.motif_hit_labels(prepared_hits, TRUE),
+        "SOX2 / p8 (+)"
+    )
+    expect_error(
+        MotifLogoTrack(hit, list(pattern_8 = motif), labelColumn = "missing"),
+        "lacks label column"
+    )
+    layout <- GvizRegulatoryTracks:::.motif_label_layout(
+        c(hit, GenomicRanges::shift(hit, 40), GenomicRanges::shift(hit, 88)),
+        c(1, 100)
+    )
+    expect_equal(layout$just, c("left", "center", "right"))
+    expect_true(all(layout$x > 1 & layout$x < 100))
+    reverse_layout <- GvizRegulatoryTracks:::.motif_label_layout(
+        c(hit, GenomicRanges::shift(hit, 40), GenomicRanges::shift(hit, 88)),
+        c(100, 1)
+    )
+    expect_equal(reverse_layout$just, c("right", "center", "left"))
+    expect_true(all(reverse_layout$x > 1 & reverse_layout$x < 100))
 })

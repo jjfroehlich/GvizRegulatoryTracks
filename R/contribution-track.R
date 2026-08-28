@@ -5,12 +5,19 @@
 #' makes their nucleotide heights directly comparable.
 #'
 #' @param ... Numeric vectors, `GRanges` objects, or a single list containing
-#'   either. For `GRanges`, values are taken from `scoreColumn`.
+#'   either. For `GRanges`, values are taken from `scoreColumn`; numeric factor
+#'   and character columns are parsed strictly.
 #' @param scoreColumn Metadata column containing scores in `GRanges` inputs.
-#' @param padding Fractional padding added above the largest absolute score.
+#' @param padding Non-negative fractional padding added above the largest
+#'   absolute score.
 #' @return A numeric vector of length two.
 #' @export
 contributionYlim <- function(..., scoreColumn = "score", padding = 0.05) {
+    if (!is.character(scoreColumn) || length(scoreColumn) != 1L ||
+        is.na(scoreColumn) || !nzchar(scoreColumn)) {
+        stop("`scoreColumn` must be one non-empty column name.", call. = FALSE)
+    }
+    padding <- .validate_scalar_number(padding, "padding", minimum = 0)
     inputs <- list(...)
     if (length(inputs) == 1L && is.list(inputs[[1L]]) &&
         !methods::is(inputs[[1L]], "GRanges")) {
@@ -21,7 +28,11 @@ contributionYlim <- function(..., scoreColumn = "score", padding = 0.05) {
             if (!scoreColumn %in% names(S4Vectors::mcols(x))) {
                 stop("A GRanges input lacks score column `", scoreColumn, "`.", call. = FALSE)
             }
-            return(as.numeric(S4Vectors::mcols(x)[[scoreColumn]]))
+            return(.score_values(
+                S4Vectors::mcols(x)[[scoreColumn]],
+                paste0("GRanges score column `", scoreColumn, "`"),
+                allowNumericNonFinite = TRUE
+            ))
         }
         if (!is.numeric(x)) {
             stop("Inputs must be numeric vectors or GRanges objects.", call. = FALSE)
@@ -51,6 +62,10 @@ scoreYlim <- contributionYlim
     }
     if (length(x) && any(IRanges::start(x) < 1L)) {
         stop("`", argument, "` must use positive, one-based GRanges coordinates.",
+             call. = FALSE)
+    }
+    if (length(x) && any(IRanges::width(x) < 1L)) {
+        stop("`", argument, "` must contain positive-width ranges.",
              call. = FALSE)
     }
     invisible(x)
@@ -99,11 +114,13 @@ scoreYlim <- contributionYlim
     if (length(chromosomes) != 1L) {
         stop("`scores` must contain exactly one chromosome.", call. = FALSE)
     }
-    if (anyDuplicated(unlist(lapply(seq_along(scores), function(i) {
-        seq.int(IRanges::start(scores)[i], IRanges::end(scores)[i])
-    }), use.names = FALSE))) {
+    if (!IRanges::isDisjoint(GenomicRanges::ranges(scores))) {
         stop("`scores` contains overlapping genomic ranges.", call. = FALSE)
     }
+    score_values <- .score_values(
+        S4Vectors::mcols(scores)[[scoreColumn]],
+        paste0("scores column `", scoreColumn, "`")
+    )
     lo <- if (is.null(targetRange)) min(IRanges::start(scores)) else IRanges::start(targetRange)
     hi <- if (is.null(targetRange)) max(IRanges::end(scores)) else IRanges::end(targetRange)
     positions <- seq.int(lo, hi)
@@ -113,7 +130,7 @@ scoreYlim <- contributionYlim
         right <- min(hi, IRanges::end(scores)[i])
         if (left <= right) {
             idx <- seq.int(left, right) - lo + 1L
-            values[idx] <- as.numeric(S4Vectors::mcols(scores)[[scoreColumn]][i])
+            values[idx] <- score_values[i]
         }
     }
     if (anyNA(values)) {
@@ -134,7 +151,8 @@ scoreYlim <- contributionYlim
             !identical(as.character(chromosome), expanded$chromosome)) {
             stop("`chromosome` disagrees with the GRanges seqname.", call. = FALSE)
         }
-        if (!missing(start) && !is.null(start) && as.integer(start) != expanded$start) {
+        if (!missing(start) && !is.null(start) &&
+            .one_based_coordinate(start, "start") != expanded$start) {
             stop("`start` disagrees with the GRanges start coordinate.", call. = FALSE)
         }
         chromosome <- expanded$chromosome
@@ -154,7 +172,7 @@ scoreYlim <- contributionYlim
         if (missing(start) || is.null(start) || length(start) != 1L || !is.finite(start)) {
             stop("`start` is required for numeric scores.", call. = FALSE)
         }
-        values <- as.numeric(scores)
+        values <- .score_values(scores, "scores")
         start <- .one_based_coordinate(start, "start")
         if (!is.null(targetRange)) {
             .validate_one_based_granges(targetRange, "region", requireOne = TRUE)
@@ -178,9 +196,6 @@ scoreYlim <- contributionYlim
         }
     } else {
         bases <- rep("N", length(values))
-    }
-    if (any(!is.finite(values))) {
-        stop("Contribution scores must all be finite.", call. = FALSE)
     }
     if (identical(normalization, "maxabs")) {
         denom <- max(abs(values))
@@ -330,7 +345,12 @@ scoreYlim <- contributionYlim
         showAxis = showAxis, col = signalColor, fill = signalFill,
         col.histogram = signalColor, fill.histogram = signalFill,
         col.baseline = baselineColor, aggregation = signalAggregation,
-        window = signalWindow, collapse = TRUE
+        # Gviz::collapseTrack() can drop the matrix dimension of a one-series
+        # DataTrack when only some adjacent ranges collapse, which makes the
+        # resulting object fail slot validation. Window aggregation already
+        # provides the required overview downsampling, so range collapsing is
+        # both redundant and unsafe here.
+        window = signalWindow, collapse = FALSE
     )
     if (!is.null(signalWindowSize)) args$windowSize <- signalWindowSize
     do.call(Gviz::DataTrack, args)
@@ -437,7 +457,8 @@ scoreYlim <- contributionYlim
 #' @param region Optional one-range `GRanges` selecting a score-file interval.
 #' @param importFunction Optional function with arguments `(file, selection)`
 #'   returning scored `GRanges`; useful for external large-BigWig readers.
-#' @param scoreColumn Score metadata column for `GRanges` input.
+#' @param scoreColumn Score metadata column for `GRanges` input. Numeric factor
+#'   and character columns are parsed strictly.
 #' @param name Gviz track title.
 #' @param normalization Either `"none"` or within-track `"maxabs"` scaling.
 #' @param ylim Numeric y limits. By default symmetric limits are derived from
@@ -498,6 +519,23 @@ ScoreSequenceTrack <- function(sequence = NULL, scores, reference = NULL,
     missing_was_default <- missing(missing)
     missing <- match.arg(missing)
     colors <- .validate_colors(colors)
+    showAxis <- .validate_flag(showAxis, "showAxis")
+    maxBases <- .validate_scalar_number(
+        maxBases, "maxBases", minimum = 0, whole = TRUE,
+        minimumInclusive = FALSE
+    )
+    negativeAlpha <- .validate_scalar_number(
+        negativeAlpha, "negativeAlpha", minimum = 0, maximum = 1
+    )
+    baselineColor <- .validate_color(baselineColor, "baselineColor")
+    signalColor <- .validate_color(signalColor, "signalColor")
+    signalFill <- .validate_color(signalFill, "signalFill")
+    if (!is.null(signalWindowSize)) {
+        signalWindowSize <- .validate_scalar_number(
+            signalWindowSize, "signalWindowSize", minimum = 0, whole = TRUE,
+            minimumInclusive = FALSE
+        )
+    }
     if (!is.null(sequence) && !is.null(reference)) {
         stop("Supply only one of `sequence` and `reference`.", call. = FALSE)
     }
@@ -559,13 +597,12 @@ ScoreSequenceTrack <- function(sequence = NULL, scores, reference = NULL,
     if (!is.numeric(ylim) || length(ylim) != 2L || any(!is.finite(ylim)) || ylim[1] >= ylim[2]) {
         stop("`ylim` must contain two increasing finite numbers.", call. = FALSE)
     }
-    if (maxBases < 1L) stop("`maxBases` must be positive.", call. = FALSE)
     .validate_track_boundary(
         showBoundary, boundaryColor, boundaryWidth, boundaryInset
     )
     .load_glyph_font(font)
     signal_track <- .make_signal_track(
-        data, prepared$chromosome, genome, as.numeric(ylim), isTRUE(showAxis),
+        data, prepared$chromosome, genome, as.numeric(ylim), showAxis,
         baselineColor, signalType, signalAggregation, signalWindow,
         signalWindowSize, signalColor, signalFill
     )
@@ -573,9 +610,9 @@ ScoreSequenceTrack <- function(sequence = NULL, scores, reference = NULL,
     vars <- list(
         data = data,
         chromosome = prepared$chromosome, source = score_source,
-        ylim = as.numeric(ylim), colors = colors, maxBases = as.integer(maxBases),
+        ylim = as.numeric(ylim), colors = colors, maxBases = maxBases,
         display = display, hasSequence = prepared$hasSequence, font = font,
-        showAxis = isTRUE(showAxis), baselineColor = baselineColor,
+        showAxis = showAxis, baselineColor = baselineColor,
         showBoundary = isTRUE(showBoundary), boundaryColor = boundaryColor,
         boundaryWidth = boundaryWidth, boundaryInset = boundaryInset,
         negativeAlpha = negativeAlpha, signalTrack = signal_track,
@@ -586,7 +623,7 @@ ScoreSequenceTrack <- function(sequence = NULL, scores, reference = NULL,
             .draw_score_sequence_track(GdObject, prepare)
         },
         variables = vars, name = name, ylim = as.numeric(ylim),
-        showAxis = isTRUE(showAxis), ...
+        showAxis = showAxis, ...
     )
     .as_gviz_numeric_custom_track(
         custom_track, data, prepared$chromosome, genome

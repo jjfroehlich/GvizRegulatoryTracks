@@ -1,18 +1,19 @@
 Package: GvizRegulatoryTracks
 Type: Package
-Title: Score-Scaled Sequence and Motif Logo Tracks for Gviz
+Title: Score-Scaled Sequence, Motif, and Directional Tracks for Gviz
 Version: 0.1.0
 Authors@R: person("Jonathan", "Froehlich", role = c("aut", "cre"),
-    email = "jonathan@example.com")
+    email = "jonathan.froehlich@gmail.com")
 Author: Jonathan Froehlich [aut, cre]
-Maintainer: Jonathan Froehlich <jonathan@example.com>
+Maintainer: Jonathan Froehlich <jonathan.froehlich@gmail.com>
 URL: https://github.com/jjfroehlich/GvizRegulatoryTracks
 BugReports: https://github.com/jjfroehlich/GvizRegulatoryTracks/issues
 Description: Adds Grid-based Gviz custom tracks for signed, base-resolution
-    nucleotide scores and genomic motif logos. Score tracks scale each
-    nucleotide by its value and delegate overview rendering to Gviz DataTrack,
-    while motif tracks place strand-aware information-content logos at genomic
-    motif matches.
+    nucleotide scores, genomic motif logos, and fixed-tip directional ranges.
+    Score tracks scale each nucleotide by its value and delegate overview
+    rendering to Gviz DataTrack, motif tracks place strand-aware
+    information-content logos at genomic motif matches, and directional tracks
+    preserve a constant physical arrowhead width across genomic zoom levels.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Depends:
@@ -28,8 +29,6 @@ Imports:
     grid,
     methods
 Suggests:
-    data.table,
-    png,
     Rsamtools,
     rtracklayer,
     testthat (>= 3.0.0),

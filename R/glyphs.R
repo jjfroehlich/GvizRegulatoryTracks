@@ -14,24 +14,33 @@
     invisible(NULL)
 }
 
+.viewport_label_layout <- function(midpoint, xscale, edgeFraction = 0.12,
+                                   insetFraction = 0.005) {
+    xscale <- as.numeric(xscale)
+    span <- if (length(xscale) == 2L) diff(xscale) else NA_real_
+    if (!is.finite(span) || span == 0) {
+        return(list(x = as.numeric(midpoint),
+                    just = rep.int("center", length(midpoint))))
+    }
+    fraction <- (as.numeric(midpoint) - xscale[1L]) / span
+    justification <- ifelse(
+        fraction <= edgeFraction, "left",
+        ifelse(fraction >= 1 - edgeFraction, "right", "center")
+    )
+    fraction <- pmin(pmax(fraction, insetFraction), 1 - insetFraction)
+    list(x = xscale[1L] + fraction * span, just = justification)
+}
+
 .validate_track_boundary <- function(show, color, width, inset) {
-    if (!is.logical(show) || length(show) != 1L || is.na(show)) {
-        stop("`showBoundary` must be TRUE or FALSE.", call. = FALSE)
-    }
-    if (!is.character(color) || length(color) != 1L || is.na(color)) {
-        stop("`boundaryColor` must be one valid color.", call. = FALSE)
-    }
-    tryCatch(grDevices::col2rgb(color), error = function(e) {
-        stop("`boundaryColor` must be one valid color.", call. = FALSE)
-    })
-    if (!is.numeric(width) || length(width) != 1L || !is.finite(width) || width <= 0) {
-        stop("`boundaryWidth` must be one positive number.", call. = FALSE)
-    }
-    if (!is.numeric(inset) || length(inset) != 1L || !is.finite(inset) ||
-        inset < 0 || inset >= 0.5) {
-        stop("`boundaryInset` must be one number from zero up to, but not including, 0.5.",
-             call. = FALSE)
-    }
+    .validate_flag(show, "showBoundary")
+    .validate_color(color, "boundaryColor")
+    .validate_scalar_number(
+        width, "boundaryWidth", minimum = 0, minimumInclusive = FALSE
+    )
+    .validate_scalar_number(
+        inset, "boundaryInset", minimum = 0, maximum = 0.5,
+        maximumInclusive = FALSE
+    )
     invisible(NULL)
 }
 
@@ -53,12 +62,15 @@
 }
 
 .validate_colors <- function(colors) {
-    if (is.null(names(colors)) || !all(c("A", "C", "G", "T") %in% names(colors))) {
+    if (!is.character(colors) || is.null(names(colors)) ||
+        !all(c("A", "C", "G", "T") %in% names(colors)) ||
+        anyDuplicated(names(colors))) {
         stop("`colors` must be a named vector containing A, C, G, and T.", call. = FALSE)
     }
     if (!"N" %in% names(colors)) {
         colors <- c(colors, N = "#777777")
     }
+    .validate_color_vector(colors, "colors", minimumLength = 5L)
     colors
 }
 

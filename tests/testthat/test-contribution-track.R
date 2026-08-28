@@ -3,6 +3,26 @@ test_that("contribution limits are shared and symmetric", {
     expect_equal(contributionYlim(c(0, 0), padding = 0), c(-1, 1))
 })
 
+test_that("contribution limits parse metadata and validate padding", {
+    factor_scores <- GenomicRanges::GRanges(
+        "chr1", IRanges::IRanges(1:3, width = 1),
+        score = factor(c("0.2", "0.8", NA))
+    )
+    character_scores <- factor_scores
+    S4Vectors::mcols(character_scores)$score <- c("-0.5", "0.25", NA)
+
+    expect_equal(contributionYlim(factor_scores, padding = 0), c(-0.8, 0.8))
+    expect_equal(contributionYlim(character_scores, padding = 0), c(-0.5, 0.5))
+    expect_equal(contributionYlim(c(1, NA, Inf), padding = 0), c(-1, 1))
+
+    S4Vectors::mcols(factor_scores)$score <- factor(c("0.2", "bad", NA))
+    expect_error(contributionYlim(factor_scores), "non-numeric")
+    S4Vectors::mcols(factor_scores)$score <- c("0.2", "Inf", NA)
+    expect_error(contributionYlim(factor_scores), "non-finite text")
+    expect_error(contributionYlim(1, padding = -0.1), "padding")
+    expect_error(contributionYlim(1, padding = Inf), "padding")
+})
+
 test_that("numeric contribution data align to one-based coordinates", {
     track <- ScoreSequenceTrack("ACGT", c(1, -2, 0.5, 0),
                                 chromosome = "chr1", start = 101)
@@ -141,6 +161,86 @@ test_that("GRanges scores expand runs and reject gaps or overlaps", {
     expect_error(ScoreSequenceTrack("A", zero_start), "one-based")
 })
 
+test_that("GRanges score metadata are parsed strictly", {
+    factor_scores <- GenomicRanges::GRanges(
+        "chr2", IRanges::IRanges(10:12, width = 1),
+        score = factor(c("1.5", "-0.5", "0"))
+    )
+    track <- ScoreSequenceTrack("ACG", factor_scores)
+    expect_equal(methods::slot(track, "variables")$data$score, c(1.5, -0.5, 0))
+
+    character_scores <- factor_scores
+    S4Vectors::mcols(character_scores)$score <- c("2", "0.25", "-1")
+    track <- ScoreSequenceTrack("ACG", character_scores)
+    expect_equal(methods::slot(track, "variables")$data$score, c(2, 0.25, -1))
+
+    S4Vectors::mcols(character_scores)$score <- c("2", "bad", "-1")
+    expect_error(ScoreSequenceTrack("ACG", character_scores), "non-numeric")
+    S4Vectors::mcols(character_scores)$score <- c(2, NA, -1)
+    expect_error(ScoreSequenceTrack("ACG", character_scores), "finite, non-missing")
+    S4Vectors::mcols(character_scores)$score <- c(2, Inf, -1)
+    expect_error(ScoreSequenceTrack("ACG", character_scores), "finite, non-missing")
+})
+
+test_that("score ranges use range-native overlap and width validation", {
+    huge_overlap <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(c(1L, 50000000L), c(100000000L, 150000000L)),
+        score = c(1, 2)
+    )
+    expect_error(
+        GvizRegulatoryTracks:::.expand_granges_scores(
+            huge_overlap, "score", "error"
+        ),
+        "overlapping"
+    )
+
+    target_scores <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(c(1L, 200000000L), c(100000000L, 300000000L)),
+        score = c(1, 2)
+    )
+    target <- GenomicRanges::GRanges("chr1", IRanges::IRanges(10, 20))
+    expanded <- GvizRegulatoryTracks:::.expand_granges_scores(
+        target_scores, "score", "error", targetRange = target
+    )
+    expect_equal(expanded$positions, 10:20)
+    expect_equal(expanded$scores, rep(1, 11))
+
+    zero_width <- GenomicRanges::GRanges(
+        "chr1", IRanges::IRanges(start = 10, width = 0), score = 1
+    )
+    expect_error(ScoreSequenceTrack(scores = zero_width), "positive-width")
+})
+
+test_that("explicit GRanges coordinates are validated without truncation", {
+    scores <- GenomicRanges::GRanges(
+        "chr1", IRanges::IRanges(10:11, width = 1), score = c(1, 2)
+    )
+    expect_no_error(ScoreSequenceTrack(scores = scores, start = 10))
+    expect_error(ScoreSequenceTrack(scores = scores, start = 10.9), "one-based")
+})
+
+test_that("score-track display parameters fail early when invalid", {
+    make_track <- function(...) {
+        ScoreSequenceTrack("A", 1, chromosome = "chr1", start = 1, ...)
+    }
+    expect_error(make_track(maxBases = 0), "maxBases")
+    expect_error(make_track(maxBases = 1.5), "maxBases")
+    expect_error(make_track(maxBases = NA_real_), "maxBases")
+    expect_error(make_track(maxBases = .Machine$integer.max + 1), "maxBases")
+    expect_error(make_track(showAxis = NA), "showAxis")
+    expect_error(make_track(showAxis = 1), "showAxis")
+    expect_error(make_track(negativeAlpha = -0.1), "negativeAlpha")
+    expect_error(make_track(negativeAlpha = 1.1), "negativeAlpha")
+    expect_error(make_track(signalWindowSize = 0), "signalWindowSize")
+    expect_error(make_track(baselineColor = "not-a-color"), "baselineColor")
+    expect_error(
+        make_track(colors = c(A = "bad", C = "blue", G = "gold", T = "red")),
+        "colors"
+    )
+})
+
 test_that("normalization and complements are correct", {
     track <- ScoreSequenceTrack("ACGTN", c(-2, -1, 0, 1, 2),
                                 chromosome = "chr1", start = 1,
@@ -171,6 +271,7 @@ test_that("automatic contribution display switches from letters to signal", {
     pars <- Gviz::displayPars(methods::slot(signal_only, "variables")$signalTrack)
     expect_equal(pars$aggregation, "mean")
     expect_equal(pars$window, "auto")
+    expect_false(pars$collapse)
 })
 
 test_that("score files are imported only for the selected region", {

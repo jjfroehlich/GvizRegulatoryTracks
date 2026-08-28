@@ -111,7 +111,14 @@
 
 .resolve_motif_id_column <- function(hits, motifIdColumn) {
     columns <- names(S4Vectors::mcols(hits))
-    if (!is.null(motifIdColumn)) return(motifIdColumn)
+    if (!is.null(motifIdColumn)) {
+        if (!is.character(motifIdColumn) || length(motifIdColumn) != 1L ||
+            is.na(motifIdColumn) || !nzchar(motifIdColumn)) {
+            stop("`motifIdColumn` must be one non-empty column name.",
+                 call. = FALSE)
+        }
+        return(motifIdColumn)
+    }
     for (candidate in c("motif_id", "name", "pattern_name")) {
         if (candidate %in% columns) return(candidate)
     }
@@ -166,8 +173,9 @@
         names(colors) <- ids
         return(colors)
     }
-    if (!is.character(motifPalette) || !length(motifPalette)) {
-        stop("`motifPalette` must be a non-empty character color vector.", call. = FALSE)
+    motifPalette <- .validate_color_vector(motifPalette, "motifPalette")
+    if (!is.null(names(motifPalette)) && anyNA(names(motifPalette))) {
+        stop("`motifPalette` names must not be missing.", call. = FALSE)
     }
     if (!is.null(names(motifPalette)) && any(nzchar(names(motifPalette)))) {
         missing_ids <- setdiff(ids, names(motifPalette))
@@ -183,9 +191,6 @@
         }
         colors <- motifPalette[seq_along(ids)]
     }
-    tryCatch(grDevices::col2rgb(colors), error = function(e) {
-        stop("`motifPalette` contains an invalid color.", call. = FALSE)
-    })
     names(colors) <- ids
     colors
 }
@@ -225,12 +230,20 @@
         mode <- match.arg(tolower(scoreLimits), c("view", "global"))
         return(list(mode = mode, limits = NULL))
     }
+    if (!is.numeric(scoreLimits) || length(scoreLimits) != 2L ||
+        any(!is.finite(scoreLimits)) || scoreLimits[1] >= scoreLimits[2]) {
+        stop("`scoreLimits` must contain two increasing finite numbers.",
+             call. = FALSE)
+    }
     list(mode = "fixed", limits = scoreLimits)
 }
 
 .motif_score_styles <- function(hits, baseFill, scoreColumn, scoreAesthetic,
                                 scoreLimits, scorePalette, scoreColor,
                                 scoreBrightness, scoreOpacity) {
+    if (!is.character(scoreAesthetic) || anyNA(scoreAesthetic)) {
+        stop("`scoreAesthetic` must be a character vector.", call. = FALSE)
+    }
     aesthetics <- unique(tolower(scoreAesthetic))
     if (!length(aesthetics)) aesthetics <- "none"
     allowed <- c("none", "fill", "border", "opacity", "brightness")
@@ -248,6 +261,24 @@
         scaledScore = rep(NA_real_, length(hits)),
         stringsAsFactors = FALSE
     )
+    if (!is.null(scorePalette)) {
+        scorePalette <- .validate_color_vector(
+            scorePalette, "scorePalette", minimumLength = 2L
+        )
+    }
+    scoreColor <- .validate_color(scoreColor, "scoreColor")
+    if (!is.numeric(scoreBrightness) || length(scoreBrightness) != 2L ||
+        any(!is.finite(scoreBrightness)) || any(scoreBrightness < 0) ||
+        any(scoreBrightness > 1)) {
+        stop("`scoreBrightness` must contain two white-mixing fractions within 0--1.",
+             call. = FALSE)
+    }
+    if (!is.numeric(scoreOpacity) || length(scoreOpacity) != 2L ||
+        any(!is.finite(scoreOpacity)) || scoreOpacity[1] < 0 ||
+        scoreOpacity[2] > 1 || scoreOpacity[1] > scoreOpacity[2]) {
+        stop("`scoreOpacity` must be an increasing two-number range within 0--1.",
+             call. = FALSE)
+    }
     if (identical(aesthetics, "none")) {
         attr(style, "scoreLimits") <- NULL
         attr(style, "scoreAesthetic") <- aesthetics
@@ -260,36 +291,16 @@
     if (is.null(scoreColumn) || !scoreColumn %in% names(S4Vectors::mcols(hits))) {
         stop("A valid `scoreColumn` is required for motif score styling.", call. = FALSE)
     }
-    values <- as.numeric(S4Vectors::mcols(hits)[[scoreColumn]])
-    if (any(!is.finite(values))) stop("Motif style scores must be finite.", call. = FALSE)
+    values <- .score_values(
+        S4Vectors::mcols(hits)[[scoreColumn]],
+        paste0("motif score column `", scoreColumn, "`")
+    )
     if (is.null(scoreLimits)) {
         scoreLimits <- if (all(values >= 0 & values <= 1)) c(0, 1) else range(values)
     }
     if (!is.numeric(scoreLimits) || length(scoreLimits) != 2L ||
         any(!is.finite(scoreLimits)) || scoreLimits[1] >= scoreLimits[2]) {
         stop("`scoreLimits` must contain two increasing finite numbers.", call. = FALSE)
-    }
-    if (!is.null(scorePalette) &&
-        (!is.character(scorePalette) || length(scorePalette) < 2L)) {
-        stop("`scorePalette` must be NULL or contain at least two colors.", call. = FALSE)
-    }
-    if (!is.character(scoreColor) || length(scoreColor) != 1L || is.na(scoreColor)) {
-        stop("`scoreColor` must be one valid color.", call. = FALSE)
-    }
-    tryCatch(grDevices::col2rgb(scoreColor), error = function(e) {
-        stop("`scoreColor` must be one valid color.", call. = FALSE)
-    })
-    if (!is.numeric(scoreBrightness) || length(scoreBrightness) != 2L ||
-        any(!is.finite(scoreBrightness)) || any(scoreBrightness < 0) ||
-        any(scoreBrightness > 1)) {
-        stop("`scoreBrightness` must contain two white-mixing fractions within 0--1.",
-             call. = FALSE)
-    }
-    if (!is.numeric(scoreOpacity) || length(scoreOpacity) != 2L ||
-        any(!is.finite(scoreOpacity)) || scoreOpacity[1] < 0 ||
-        scoreOpacity[2] > 1 || scoreOpacity[1] > scoreOpacity[2]) {
-        stop("`scoreOpacity` must be an increasing two-number range within 0--1.",
-             call. = FALSE)
     }
     scaled <- pmin(1, pmax(0, (values - scoreLimits[1]) / diff(scoreLimits)))
     brightness <- scoreBrightness[1] + scaled * diff(scoreBrightness)
@@ -372,11 +383,20 @@
 }
 
 .motif_hit_labels <- function(hits, showStrand) {
-    labels <- as.character(S4Vectors::mcols(hits)$motif_id)
+    labels <- if ("label" %in% names(S4Vectors::mcols(hits))) {
+        as.character(S4Vectors::mcols(hits)$label)
+    } else {
+        as.character(S4Vectors::mcols(hits)$motif_id)
+    }
     if (isTRUE(showStrand)) {
         labels <- paste0(labels, " (", as.character(GenomicRanges::strand(hits)), ")")
     }
     labels
+}
+
+.motif_label_layout <- function(hits, xscale, edgeFraction = 0.12) {
+    midpoint <- (IRanges::start(hits) + IRanges::end(hits)) / 2
+    .viewport_label_layout(midpoint, xscale, edgeFraction = edgeFraction)
 }
 
 .score_legend_styles <- function(vars, n = 64L) {
@@ -412,11 +432,29 @@
     max(minimumWidth, title_width + 2 * padding)
 }
 
+.score_legend_layout <- function(title) {
+    title <- if (is.null(title) || !length(title)) "" else as.character(title)[1L]
+    title_lines <- if (nzchar(title)) {
+        length(strsplit(title, "\n", fixed = TRUE)[[1L]])
+    } else 0L
+    # Reserve a title band inside the legend border. In particular, anchoring
+    # multi-line titles from their top edge prevents their first line from
+    # crossing the rounded rectangle at short track heights.
+    title_band <- if (title_lines) min(0.48, 0.12 + 0.16 * title_lines) else 0
+    list(
+        title_y = 0.95,
+        title_just = c("center", "top"),
+        gradient_min = 0.14,
+        gradient_max = 0.91 - title_band
+    )
+}
+
 .draw_score_legend <- function(vars, scoreLimits) {
     if (!isTRUE(vars$showScoreLegend) || is.null(scoreLimits)) {
         return(invisible(NULL))
     }
     styles <- .score_legend_styles(vars)
+    layout <- .score_legend_layout(vars$scoreLegendTitle)
     n <- nrow(styles)
     track_height <- grid::convertHeight(grid::unit(1, "npc"), "mm", valueOnly = TRUE)
     legend_height <- min(vars$scoreLegendHeight, max(3, track_height - 2))
@@ -436,8 +474,8 @@
         gp = grid::gpar(fill = grDevices::adjustcolor("white", alpha.f = 0.96),
                         col = "#777777", lwd = 0.7)
     )
-    ymin <- 0.16
-    ymax <- 0.82
+    ymin <- layout$gradient_min
+    ymax <- layout$gradient_max
     edges <- seq(ymin, ymax, length.out = n + 1L)
     for (i in seq_len(n)) {
         grid::grid.rect(
@@ -470,7 +508,7 @@
     )
     grid::grid.text(
         vars$scoreLegendTitle, x = grid::unit(0.5, "native"),
-        y = grid::unit(0.94, "native"),
+        y = grid::unit(layout$title_y, "native"), just = layout$title_just,
         gp = grid::gpar(col = "#222222", fontsize = 5.5, fontface = "bold")
     )
     invisible(NULL)
@@ -487,7 +525,7 @@
         fixed = vars$scoreLimits,
         global = vars$globalScoreLimits,
         view = .score_data_limits(
-            S4Vectors::mcols(hits)[[vars$scoreColumn]], vars$globalScoreLimits
+            vars$hitStyles$score[keep], vars$globalScoreLimits
         )
     )
     styles <- .motif_score_styles(
@@ -503,6 +541,23 @@
     if (span <= maxBases) "logo" else "ranges"
 }
 
+.resolve_motif_range_styles <- function(styles, vars) {
+    fill <- ifelse(is.na(styles$fill), vars$rangeFill, styles$fill)
+    brighten <- is.finite(styles$brightness) & styles$brightness > 0
+    if (any(brighten)) {
+        fill[brighten] <- .mix_with_white(
+            fill[brighten], styles$brightness[brighten]
+        )
+    }
+    border <- ifelse(is.na(styles$border), vars$rangeBorder, styles$border)
+    data.frame(
+        fill = fill,
+        border = border,
+        alpha = vars$rangeAlpha * styles$alpha,
+        stringsAsFactors = FALSE
+    )
+}
+
 .draw_motif_ranges <- function(hits, styles, vars, xscale) {
     nlanes <- max(1L, if (length(hits)) max(S4Vectors::mcols(hits)$lane) else 1L)
     labels_visible <- vars$showLabels && length(hits) <= vars$maxRangeLabels
@@ -513,13 +568,8 @@
     on.exit(grid::popViewport(), add = TRUE)
     if (!length(hits)) return(invisible(NULL))
     lanes <- S4Vectors::mcols(hits)$lane
+    range_styles <- .resolve_motif_range_styles(styles, vars)
     for (i in seq_along(hits)) {
-        fill <- if (is.na(styles$fill[i])) vars$rangeFill else styles$fill[i]
-        if (styles$brightness[i] > 0) {
-            fill <- .mix_with_white(fill, styles$brightness[i])
-        }
-        border <- if (is.na(styles$border[i])) vars$rangeBorder else styles$border[i]
-        alpha <- vars$rangeAlpha * styles$alpha[i]
         grid::grid.rect(
             x = grid::unit((IRanges::start(hits)[i] + IRanges::end(hits)[i]) / 2,
                            "native"),
@@ -527,19 +577,28 @@
             width = grid::unit(IRanges::width(hits)[i], "native"),
             height = grid::unit(0.64, "native"),
             gp = grid::gpar(
-                fill = grDevices::adjustcolor(fill, alpha.f = alpha),
-                col = grDevices::adjustcolor(border, alpha.f = alpha), lwd = 0.6
+                fill = grDevices::adjustcolor(
+                    range_styles$fill[i], alpha.f = range_styles$alpha[i]
+                ),
+                col = grDevices::adjustcolor(
+                    range_styles$border[i], alpha.f = range_styles$alpha[i]
+                ),
+                lwd = 0.6
             )
         )
     }
     if (labels_visible) {
         ids <- .motif_hit_labels(hits, vars$showStrand)
-        grid::grid.text(
-            ids,
-            x = grid::unit((IRanges::start(hits) + IRanges::end(hits)) / 2, "native"),
-            y = grid::unit(lanes + 0.34, "native"), just = c("center", "bottom"),
-            gp = grid::gpar(col = "#333333", fontsize = 6)
-        )
+        label_layout <- .motif_label_layout(hits, xscale)
+        for (i in seq_along(ids)) {
+            grid::grid.text(
+                ids[i],
+                x = grid::unit(label_layout$x[i], "native"),
+                y = grid::unit(lanes[i] + 0.34, "native"),
+                just = c(label_layout$just[i], "bottom"),
+                gp = grid::gpar(col = "#333333", fontsize = 6)
+            )
+        }
     }
     invisible(NULL)
 }
@@ -597,10 +656,11 @@
                              vars$scoreBorderWidth, vars$reverseComplementMinus)
             if (vars$showLabels) {
                 y <- baseline + layout$motifHeight + layout$labelHeight / 2
+                label_layout <- .motif_label_layout(hits[i], xscale)
                 grid::grid.text(
                     .motif_hit_labels(hits[i], vars$showStrand),
-                    x = grid::unit((IRanges::start(hits)[i] + IRanges::end(hits)[i]) / 2, "native"),
-                    y = grid::unit(y, "native"), just = "center",
+                    x = grid::unit(label_layout$x, "native"),
+                    y = grid::unit(y, "native"), just = label_layout$just,
                     gp = grid::gpar(
                         col = "#333333", fontsize = layout$labelFontsize
                     )
@@ -623,6 +683,8 @@
 #'   a MEME file path.
 #' @param motifIdColumn Metadata column in `hits` matching `names(motifs)`.
 #'   `NULL` automatically checks `motif_id`, BED `name`, and `pattern_name`.
+#' @param labelColumn Optional metadata column used for displayed hit labels.
+#'   `NULL` retains motif IDs, preserving the existing default.
 #' @param matrixType Interpretation of plain matrices, `"PPM"` or `"PCM"`.
 #' @param name Gviz track title.
 #' @param colors Named nucleotide color vector.
@@ -658,6 +720,7 @@
 #' @param rangeFill,rangeBorder,rangeAlpha Appearance of overview ranges.
 #' @param maxRangeLabels Maximum number of overview ranges that may be labeled.
 #' @param scoreColumn Numeric hit metadata column used for confidence styling.
+#'   Numeric factor and character columns are parsed strictly.
 #' @param scoreAesthetic `"none"` or one or more of `"fill"`, `"border"`,
 #'   `"opacity"`, and `"brightness"`. Styling is applied consistently to logos
 #'   and overview ranges. Score fill and motif-ID fill are mutually exclusive;
@@ -688,6 +751,7 @@
 #' @return A `Gviz::CustomTrack`.
 #' @export
 MotifLogoTrack <- function(hits, motifs, motifIdColumn = NULL,
+                           labelColumn = NULL,
                            matrixType = c("PPM", "PCM"), name = "Motifs",
                            colors = .nucleotide_colors(), laneGap = 0.30,
                            motifHeight = 10,
@@ -718,6 +782,40 @@ MotifLogoTrack <- function(hits, motifs, motifIdColumn = NULL,
     display <- match.arg(display)
     motifColorBy <- match.arg(motifColorBy)
     colors <- .validate_colors(colors)
+    if (!is.null(scoreColumn) &&
+        (!is.character(scoreColumn) || length(scoreColumn) != 1L ||
+         is.na(scoreColumn) || !nzchar(scoreColumn))) {
+        stop("`scoreColumn` must be NULL or one non-empty column name.",
+             call. = FALSE)
+    }
+    if (!is.null(labelColumn) &&
+        (!is.character(labelColumn) || length(labelColumn) != 1L ||
+         is.na(labelColumn) || !nzchar(labelColumn))) {
+        stop("`labelColumn` must be NULL or one non-empty column name.",
+             call. = FALSE)
+    }
+    showLabels <- .validate_flag(showLabels, "showLabels")
+    showStrand <- .validate_flag(showStrand, "showStrand")
+    reverseComplementMinus <- .validate_flag(
+        reverseComplementMinus, "reverseComplementMinus"
+    )
+    showAxis <- .validate_flag(showAxis, "showAxis")
+    showScoreLegend <- .validate_flag(showScoreLegend, "showScoreLegend")
+    maxBases <- .validate_scalar_number(
+        maxBases, "maxBases", minimum = 0, whole = TRUE,
+        minimumInclusive = FALSE
+    )
+    maxRangeLabels <- .validate_scalar_number(
+        maxRangeLabels, "maxRangeLabels", minimum = 0, whole = TRUE
+    )
+    rangeAlpha <- .validate_scalar_number(
+        rangeAlpha, "rangeAlpha", minimum = 0, maximum = 1
+    )
+    scoreBorderWidth <- .validate_scalar_number(
+        scoreBorderWidth, "scoreBorderWidth", minimum = 0
+    )
+    rangeFill <- .validate_color(rangeFill, "rangeFill")
+    rangeBorder <- .validate_color(rangeBorder, "rangeBorder")
     if (!is.numeric(laneGap) || length(laneGap) != 1L ||
         !is.finite(laneGap) || laneGap < 0) {
         stop("`laneGap` must be one non-negative number.", call. = FALSE)
@@ -731,6 +829,16 @@ MotifLogoTrack <- function(hits, motifs, motifIdColumn = NULL,
     )
     .load_glyph_font(font)
     prepared <- .prepare_motif_data(hits, motifs, motifIdColumn, matrixType)
+    if (!is.null(labelColumn)) {
+        if (!labelColumn %in% names(S4Vectors::mcols(prepared$hits))) {
+            stop("`hits` lacks label column `", labelColumn, "`.", call. = FALSE)
+        }
+        labels <- as.character(S4Vectors::mcols(prepared$hits)[[labelColumn]])
+        if (anyNA(labels) || any(!nzchar(labels))) {
+            stop("Motif labels must be non-missing strings.", call. = FALSE)
+        }
+        S4Vectors::mcols(prepared$hits)$label <- labels
+    }
     motif_colors <- .resolve_motif_colors(
         S4Vectors::mcols(prepared$hits)$motif_id, motifColorBy, motifPalette
     )
@@ -742,7 +850,10 @@ MotifLogoTrack <- function(hits, motifs, motifIdColumn = NULL,
     score_limit_spec <- .resolve_score_limit_spec(scoreLimits)
     score_values <- if (!is.null(scoreColumn) &&
                         scoreColumn %in% names(S4Vectors::mcols(prepared$hits))) {
-        as.numeric(S4Vectors::mcols(prepared$hits)[[scoreColumn]])
+        .score_values(
+            S4Vectors::mcols(prepared$hits)[[scoreColumn]],
+            paste0("motif score column `", scoreColumn, "`")
+        )
     } else numeric()
     global_score_limits <- if (length(score_values)) {
         .score_data_limits(score_values)
@@ -758,9 +869,15 @@ MotifLogoTrack <- function(hits, motifs, motifIdColumn = NULL,
         attr(hit_styles, "scoreLimits")
     } else NULL
     resolved_score_aesthetic <- attr(hit_styles, "scoreAesthetic")
-    score_legend_active <- isTRUE(showScoreLegend) &&
+    score_legend_active <- showScoreLegend &&
         !identical(resolved_score_aesthetic, "none")
     if (is.null(scoreLegendTitle)) scoreLegendTitle <- scoreColumn
+    if (!is.null(scoreLegendTitle) &&
+        (!is.character(scoreLegendTitle) || length(scoreLegendTitle) != 1L ||
+         is.na(scoreLegendTitle))) {
+        stop("`scoreLegendTitle` must be NULL or one character string.",
+             call. = FALSE)
+    }
     if (!is.numeric(scoreLegendWidth) || length(scoreLegendWidth) != 1L ||
         !is.finite(scoreLegendWidth) || scoreLegendWidth <= 0) {
         stop("`scoreLegendWidth` must be one positive number of mm.", call. = FALSE)
@@ -769,30 +886,24 @@ MotifLogoTrack <- function(hits, motifs, motifIdColumn = NULL,
         !is.finite(scoreLegendHeight) || scoreLegendHeight <= 0) {
         stop("`scoreLegendHeight` must be one positive number of mm.", call. = FALSE)
     }
-    if (!is.numeric(scoreLegendDigits) || length(scoreLegendDigits) != 1L ||
-        !is.finite(scoreLegendDigits) || scoreLegendDigits < 1) {
-        stop("`scoreLegendDigits` must be a positive integer.", call. = FALSE)
-    }
-    if (!is.character(scoreLegendColor) || length(scoreLegendColor) != 1L ||
-        is.na(scoreLegendColor)) {
-        stop("`scoreLegendColor` must be one valid color.", call. = FALSE)
-    }
-    tryCatch(grDevices::col2rgb(scoreLegendColor), error = function(e) {
-        stop("`scoreLegendColor` must be one valid color.", call. = FALSE)
-    })
+    scoreLegendDigits <- .validate_scalar_number(
+        scoreLegendDigits, "scoreLegendDigits", minimum = 0, whole = TRUE,
+        minimumInclusive = FALSE
+    )
+    scoreLegendColor <- .validate_color(scoreLegendColor, "scoreLegendColor")
     vars <- c(prepared, list(
         colors = colors, laneGap = laneGap, motifHeight = motifHeight,
-        showLabels = isTRUE(showLabels),
-        showStrand = isTRUE(showStrand),
-        reverseComplementMinus = isTRUE(reverseComplementMinus),
+        showLabels = showLabels,
+        showStrand = showStrand,
+        reverseComplementMinus = reverseComplementMinus,
         motifColorBy = motifColorBy, motifPalette = motifPalette,
         motifColors = motif_colors, baseFill = base_fill,
-        showAxis = isTRUE(showAxis), maxBases = as.integer(maxBases),
+        showAxis = showAxis, maxBases = maxBases,
         showBoundary = isTRUE(showBoundary), boundaryColor = boundaryColor,
         boundaryWidth = boundaryWidth, boundaryInset = boundaryInset,
         display = display, font = font, rangeFill = rangeFill,
         rangeBorder = rangeBorder, rangeAlpha = rangeAlpha,
-        maxRangeLabels = as.integer(maxRangeLabels), hitStyles = hit_styles,
+        maxRangeLabels = maxRangeLabels, hitStyles = hit_styles,
         scoreColumn = scoreColumn, scoreAesthetic = resolved_score_aesthetic,
         scoreLimits = resolved_score_limits, scorePalette = scorePalette,
         scoreLimitMode = score_limit_spec$mode,
@@ -803,7 +914,7 @@ MotifLogoTrack <- function(hits, motifs, motifIdColumn = NULL,
         scoreLegendTitle = scoreLegendTitle,
         scoreLegendWidth = scoreLegendWidth,
         scoreLegendHeight = scoreLegendHeight,
-        scoreLegendDigits = as.integer(scoreLegendDigits),
+        scoreLegendDigits = scoreLegendDigits,
         scoreLegendColor = scoreLegendColor
     ))
     Gviz::CustomTrack(

@@ -70,7 +70,8 @@ supplied sequence.}
 \item{importFunction}{Optional function with arguments \verb{(file, selection)}
 returning scored \code{GRanges}; useful for external large-BigWig readers.}
 
-\item{scoreColumn}{Score metadata column for \code{GRanges} input.}
+\item{scoreColumn}{Score metadata column for \code{GRanges} input. Numeric factor
+and character columns are parsed strictly.}
 
 \item{name}{Gviz track title.}
 

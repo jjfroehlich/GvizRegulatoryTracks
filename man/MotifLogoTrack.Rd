@@ -8,6 +8,7 @@ MotifLogoTrack(
   hits,
   motifs,
   motifIdColumn = NULL,
+  labelColumn = NULL,
   matrixType = c("PPM", "PCM"),
   name = "Motifs",
   colors = .nucleotide_colors(),
@@ -55,6 +56,9 @@ a MEME file path.}
 
 \item{motifIdColumn}{Metadata column in \code{hits} matching \code{names(motifs)}.
 \code{NULL} automatically checks \code{motif_id}, BED \code{name}, and \code{pattern_name}.}
+
+\item{labelColumn}{Optional metadata column used for displayed hit labels.
+\code{NULL} retains motif IDs, preserving the existing default.}
 
 \item{matrixType}{Interpretation of plain matrices, \code{"PPM"} or \code{"PCM"}.}
 
@@ -109,7 +113,8 @@ or forced ranges.}
 
 \item{maxRangeLabels}{Maximum number of overview ranges that may be labeled.}
 
-\item{scoreColumn}{Numeric hit metadata column used for confidence styling.}
+\item{scoreColumn}{Numeric hit metadata column used for confidence styling.
+Numeric factor and character columns are parsed strictly.}
 
 \item{scoreAesthetic}{\code{"none"} or one or more of \code{"fill"}, \code{"border"},
 \code{"opacity"}, and \code{"brightness"}. Styling is applied consistently to logos
